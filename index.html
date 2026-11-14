@@ -88,6 +88,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   </div>
 
   <div id="bilan"></div>
+  <pre id="journalBt" class="note" style="white-space:pre-wrap;margin:0"></pre>
 
   <p class="note">
     Règle du jeu : tiens la bille au-dessus de la ligne sans décrocher pour valider un palier. Chaque palier demande 5 secondes de plus que le précédent (jusqu'à 60) et remonte la ligne.
@@ -138,7 +139,16 @@ function recoit(nom, ev){
   const t = tampons[nom];
   for (const v of s) t.ajoute(0.48828125 * (v - 0x800));          // en microvolts
 }
+function trace(t){ $("journalBt").textContent += t + "\n"; }
+const pause = ms => new Promise(r => setTimeout(r, ms));
+async function ecrit(c, txt){
+  const d = commande(txt);
+  try { if (c.writeValueWithoutResponse) { await c.writeValueWithoutResponse(d); return; } } catch(e){ trace("  écriture sans réponse refusée, autre méthode"); }
+  await c.writeValue(d);
+}
 async function connecter(){
+  $("journalBt").textContent = "";
+  trace("Journal de connexion (version 3)");
   if (!navigator.bluetooth){
     etat("Bluetooth web indisponible ici. Sur iPhone, ouvre cette page dans Bluefy. Sinon Chrome sur ordinateur ou Android.");
     return;
@@ -146,26 +156,32 @@ async function connecter(){
   try{
     arreterDemo();
     etat("Recherche du casque…");
-    appareil = await navigator.bluetooth.requestDevice({ filters:[{ services:[SERVICE] }] });
+    trace("1. Recherche du casque");
+    appareil = await navigator.bluetooth.requestDevice({ filters:[{ namePrefix:"Muse" }, { services:[SERVICE] }], optionalServices:[SERVICE] });
+    trace("2. Casque choisi : " + appareil.name);
     appareil.addEventListener("gattserverdisconnected", () => { etat("Casque déconnecté"); source = null; $("bJouer").disabled = true; });
     const gatt = await appareil.gatt.connect();
+    trace("3. Liaison Bluetooth ouverte");
     const service = await gatt.getPrimaryService(SERVICE);
+    trace("4. Service Muse trouvé");
     controle = await service.getCharacteristic(UUID("0001"));
+    trace("5. Canal de commande trouvé");
     for (const [nom, uuid] of Object.entries(CANAUX)){
       const c = await service.getCharacteristic(uuid);
       c.addEventListener("characteristicvaluechanged", ev => recoit(nom, ev));
       await c.startNotifications();
+      trace("6. Écoute de " + nom + " active");
     }
-    await controle.writeValue(commande("h"));
-    await controle.writeValue(commande("p21"));
-    await controle.writeValue(commande("s"));
-    await controle.writeValue(commande("d"));
+    for (const cmd of ["h", "p21", "s", "d"]){ await ecrit(controle, cmd); await pause(150); }
+    trace("7. Commandes de démarrage envoyées");
+    setTimeout(() => trace(tampons.AF7.n > 0 ? "8. Données EEG reçues, tout fonctionne" : "8. Aucune donnée EEG reçue après 3 s"), 3000);
     source = "muse";
     etat("Connecté : " + (appareil.name || "Muse"));
     $("bJouer").disabled = false;
     message("Ajuste le casque jusqu'à avoir les deux pastilles du front en vert, puis lance une manche.");
   }catch(e){
     etat("Connexion impossible : " + (e && e.message ? e.message : e));
+    trace("ERREUR : " + (e && e.name ? e.name + " : " : "") + (e && e.message ? e.message : e));
   }
 }
 
