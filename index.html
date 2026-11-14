@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus Muse</title>
+<style>
+:root{
+  /* Un seul univers sombre. Mise en page : colonne unique, le graphique de jeu au centre. */
+  --fond:#0d1330; --panneau:#161d45; --trait:#2a3370; --texte:#e9ecff; --doux:#9aa3d6;
+  --focus:#ffb547; --ligne:#5fd4ff; --alerte:#ff6b7d; --ok:#59e3a0;
+  --police: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--fond);color:var(--texte);font-family:var(--police);display:flex;justify-content:center}
+main{width:100%;max-width:760px;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:100%}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-size:1.25rem;margin:0;letter-spacing:.02em}
+#etat{color:var(--doux);font-size:.9rem}
+.rang{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,select{font:inherit;color:var(--texte);background:var(--panneau);border:1px solid var(--trait);border-radius:10px;padding:10px 14px;cursor:pointer}
+button.principal{background:var(--focus);color:#1b1300;border-color:var(--focus);font-weight:700}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,select:focus-visible{outline:2px solid var(--ligne);outline-offset:2px}
+.capteurs{display:flex;gap:14px;font-size:.8rem;color:var(--doux);flex-wrap:wrap}
+.capteur{display:flex;align-items:center;gap:6px}
+.pastille{width:10px;height:10px;border-radius:50%;background:var(--trait)}
+.pastille.bon{background:var(--ok)}
+.pastille.mauvais{background:var(--alerte)}
+#scene{position:relative;flex:1;min-height:280px;background:var(--panneau);border:1px solid var(--trait);border-radius:14px;overflow:hidden}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#message{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:.95rem;color:var(--texte);padding:0 16px;pointer-events:none}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--panneau);border:1px solid var(--trait);border-radius:12px;padding:10px;text-align:center}
+.stat b{display:block;font-size:1.5rem;font-variant-numeric:tabular-nums}
+.stat span{font-size:.72rem;color:var(--doux);text-transform:uppercase;letter-spacing:.06em}
+#focusV{color:var(--focus)}
+#bilan{background:var(--panneau);border:1px solid var(--trait);border-radius:12px;padding:14px;line-height:1.6;display:none}
+#bilan h2{margin:0 0 6px;font-size:1rem}
+.note{font-size:.78rem;color:var(--doux);line-height:1.5}
+@media (max-width:420px){.stat b{font-size:1.2rem}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Focus Muse</h1>
+    <div id="etat">Casque non connecté</div>
+  </header>
+
+  <div class="rang">
+    <button id="bConnecter" class="principal">Connecter le Muse 2</button>
+    <button id="bDemo">Mode démo (sans casque)</button>
+    <label for="duree" class="note">Durée</label>
+    <select id="duree">
+      <option value="120">2 min</option>
+      <option value="180" selected>3 min</option>
+      <option value="300">5 min</option>
+      <option value="600">10 min</option>
+    </select>
+    <label for="mode" class="note">Mode</label>
+    <select id="mode">
+      <option value="normal">Normal</option>
+      <option value="hard" selected>Hardcore</option>
+    </select>
+    <button id="bJouer" disabled>Lancer une manche</button>
+  </div>
+
+  <div class="capteurs" aria-label="Qualité du contact des électrodes">
+    <div class="capteur"><i class="pastille" id="qTP9"></i>Oreille G</div>
+    <div class="capteur"><i class="pastille" id="qAF7"></i>Front G</div>
+    <div class="capteur"><i class="pastille" id="qAF8"></i>Front D</div>
+    <div class="capteur"><i class="pastille" id="qTP10"></i>Oreille D</div>
+  </div>
+
+  <div id="scene">
+    <canvas id="toile"></canvas>
+    <div id="message">Connecte le casque ou lance le mode démo, puis démarre une manche.</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="focusV">0</b><span>Focus</span></div>
+    <div class="stat"><b id="palierV">1</b><span>Palier</span></div>
+    <div class="stat"><b id="pointsV">0</b><span>Points</span></div>
+    <div class="stat"><b id="tempsV">0:00</b><span>Reste</span></div>
+  </div>
+
+  <div id="bilan"></div>
+
+  <p class="note">
+    Règle du jeu : tiens la bille au-dessus de la ligne sans décrocher pour valider un palier. Chaque palier demande 5 secondes de plus que le précédent (jusqu'à 60) et remonte la ligne.
+    En Hardcore tu as 3 vies, la ligne ne redescend jamais, et 5 secondes sous la ligne coûtent une vie. En Normal, la ligne redescend si tu restes bloqué.
+    Le score vient des deux électrodes du front (ondes bêta rapportées aux ondes alpha et thêta), comparé à ton calibrage de départ.
+    Reste immobile, mâchoire relâchée : serrer les dents ou cligner fausse le signal, et le jeu gèle alors le score.
+    C'est un entraînement, pas une mesure médicale.
+  </p>
+</main>
+
+<script>
+"use strict";
+const FE = 256, N = 512;                       // fréquence d'échantillonnage, taille de fenêtre (2 s)
+const SERVICE = 0xfe8d;
+const UUID = s => "273e" + s + "-4c4d-454d-96be-f03bac821358";
+const CANAUX = { TP9: UUID("0003"), AF7: UUID("0004"), AF8: UUID("0005"), TP10: UUID("0006") };
+const $ = id => document.getElementById(id);
+
+/* ---------- tampons circulaires ---------- */
+class Tampon {
+  constructor(){ this.b = new Float32Array(N); this.i = 0; this.n = 0; }
+  ajoute(v){ this.b[this.i] = v; this.i = (this.i + 1) % N; if (this.n < N) this.n++; }
+  ordonne(){ const o = new Float32Array(N); for (let k = 0; k < N; k++) o[k] = this.b[(this.i + k) % N]; return o; }
+  vide(){ this.i = 0; this.n = 0; this.b.fill(0); }
+}
+const tampons = { TP9:new Tampon(), AF7:new Tampon(), AF8:new Tampon(), TP10:new Tampon() };
+
+/* ---------- Bluetooth Muse ---------- */
+let appareil = null, controle = null, demoId = null;
+
+function commande(txt){
+  const d = new TextEncoder().encode("X" + txt + "\n");
+  d[0] = d.length - 1;
+  return d;
+}
+function decode12(octets){
+  const s = [];
+  for (let i = 0; i < octets.length; i++){
+    if (i % 3 === 0) s.push((octets[i] << 4) | (octets[i + 1] >> 4));
+    else { s.push(((octets[i] & 0xf) << 8) | octets[i + 1]); i++; }
+  }
+  return s;
+}
+function recoit(nom, ev){
+  const dv = ev.target.value;
+  const o = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength).subarray(2);   // 2 octets d'index, puis 12 échantillons
+  const s = decode12(o);
+  const t = tampons[nom];
+  for (const v of s) t.ajoute(0.48828125 * (v - 0x800));          // en microvolts
+}
+async function connecter(){
+  if (!navigator.bluetooth){
+    etat("Bluetooth web indisponible ici. Sur iPhone, ouvre cette page dans Bluefy. Sinon Chrome sur ordinateur ou Android.");
+    return;
+  }
+  try{
+    arreterDemo();
+    etat("Recherche du casque…");
+    appareil = await navigator.bluetooth.requestDevice({ filters:[{ services:[SERVICE] }] });
+    appareil.addEventListener("gattserverdisconnected", () => { etat("Casque déconnecté"); source = null; $("bJouer").disabled = true; });
+    const gatt = await appareil.gatt.connect();
+    const service = await gatt.getPrimaryService(SERVICE);
+    controle = await service.getCharacteristic(UUID("0001"));
+    for (const [nom, uuid] of Object.entries(CANAUX)){
+      const c = await service.getCharacteristic(uuid);
+      c.addEventListener("characteristicvaluechanged", ev => recoit(nom, ev));
+      await c.startNotifications();
+    }
+    await controle.writeValue(commande("h"));
+    await controle.writeValue(commande("p21"));
+    await controle.writeValue(commande("s"));
+    await controle.writeValue(commande("d"));
+    source = "muse";
+    etat("Connecté : " + (appareil.name || "Muse"));
+    $("bJouer").disabled = false;
+    message("Ajuste le casque jusqu'à avoir les deux pastilles du front en vert, puis lance une manche.");
+  }catch(e){
+    etat("Connexion impossible : " + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- mode démo : signal synthétique ---------- */
+function gauss(){ return Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random()); }
+let tDemo = 0, derive = 0.5;
+function lancerDemo(){
+  arreterDemo();
+  if (appareil && appareil.gatt && appareil.gatt.connected) appareil.gatt.disconnect();
+  source = "demo";
+  for (const k in tampons) tampons[k].vide();
+  demoId = setInterval(() => {
+    derive += gauss() * 0.02; derive = Math.min(1, Math.max(0, derive));
+    const f = Math.min(1, Math.max(0, 0.5 + 0.35 * Math.sin(2 * Math.PI * tDemo / 37) + (derive - 0.5) * 0.6));
+    for (let k = 0; k < 12; k++){
+      tDemo += 1 / FE;
+      const base = 9 * Math.sin(2 * Math.PI * 6 * tDemo) + 14 * (1.25 - f) * Math.sin(2 * Math.PI * 10 * tDemo)
+                 + 7 * (0.35 + f) * Math.sin(2 * Math.PI * 20 * tDemo + 1);
+      for (const nom in tampons) tampons[nom].ajoute(base + gauss() * 5);
+    }
+  }, 1000 * 12 / FE);
+  etat("Mode démo : signal simulé");
+  $("bJouer").disabled = false;
+  message("Signal simulé. Lance une manche pour voir le jeu tourner.");
+}
+function arreterDemo(){ if (demoId){ clearInterval(demoId); demoId = null; } }
+
+/* ---------- traitement du signal ---------- */
+const HANN = new Float32Array(N); for (let i = 0; i < N; i++) HANN[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+function fft(re, im){
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++){
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j){ let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1){
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len){
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++){
+        const a = i + k, b = a + len / 2;
+        const xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+function analyse(t){
+  const x = t.ordonne();
+  let m = 0; for (let i = 0; i < N; i++) m += x[i]; m /= N;
+  let v = 0, mn = Infinity, mx = -Infinity;
+  for (let i = N - FE; i < N; i++){ const d = x[i] - m; v += d * d; if (x[i] < mn) mn = x[i]; if (x[i] > mx) mx = x[i]; }
+  const ecart = Math.sqrt(v / FE), crete = mx - mn;
+  const re = new Float32Array(N), im = new Float32Array(N);
+  for (let i = 0; i < N; i++) re[i] = (x[i] - m) * HANN[i];
+  fft(re, im);
+  const bande = (f1, f2) => { let s = 0; for (let k = Math.round(f1 * N / FE); k < Math.round(f2 * N / FE); k++) s += re[k] * re[k] + im[k] * im[k]; return s; };
+  return { ecart, crete, theta: bande(4, 8), alpha: bande(8, 13), beta: bande(13, 26), emg: bande(35, 45) };
+}
+
+/* ---------- jeu ---------- */
+let source = null;
+let phase = "attente";             // attente | calibrage | jeu | fini
+let calib = [], calibEmg = [], mu = 0, sigma = 1, emgBase = 0, tPhase = 0;
+let score = 50, seuil = 55, serie = 0, combo = 1, points = 0, ecoule = 0, enZone = 0, serieMax = 0, somme = 0, nMes = 0;
+let duree = 180, histo = [], gel = "";
+let hard = true, palier = 1, objectif = 10, debutPalier = 0, sous = 0, tBloque = 0, vies = 3, flash = "", tFlash = 0, raison = "";
+const PAS = 0.25;
+
+function etat(t){ $("etat").textContent = t; }
+function message(t){ $("message").textContent = t; }
+function borne(v, a, b){ return Math.min(b, Math.max(a, v)); }
+
+function lancerManche(){
+  if (!source) return;
+  duree = +$("duree").value;
+  phase = "calibrage"; tPhase = 0; calib = []; calibEmg = [];
+  score = 50; seuil = 55; serie = 0; combo = 1; points = 0; ecoule = 0; enZone = 0; serieMax = 0; somme = 0; nMes = 0;
+  histo = [];
+  hard = $("mode").value === "hard"; seuil = hard ? 60 : 55;
+  palier = 1; objectif = 10; debutPalier = 0; sous = 0; tBloque = 0; vies = 3; flash = ""; tFlash = 0; raison = "";
+  $("bilan").style.display = "none";
+  $("bJouer").disabled = true;
+}
+function finManche(){
+  phase = "fini";
+  $("bJouer").disabled = !source;
+  const moyenne = nMes ? Math.round(somme / nMes) : 0;
+  const pctZone = Math.round(100 * enZone / Math.max(1, ecoule));
+  let record = 0;
+  try { record = +(localStorage.getItem("focusMuseRecord") || 0); } catch(e){}
+  const total = Math.round(points), battu = total > record;
+  if (battu){ try { localStorage.setItem("focusMuseRecord", String(total)); } catch(e){} }
+  let journal = [];
+  try { journal = JSON.parse(localStorage.getItem("focusMuseJournal") || "[]"); } catch(e){}
+  const d = new Date();
+  journal.unshift({ j: d.getDate() + "/" + (d.getMonth() + 1), m: hard ? "Hardcore" : "Normal", p: palier, f: moyenne, pts: total });
+  journal = journal.slice(0, 20);
+  try { localStorage.setItem("focusMuseJournal", JSON.stringify(journal)); } catch(e){}
+  const lignes = journal.slice(0, 6).map(x => x.j + " · " + x.m + " · palier " + x.p + " · focus " + x.f + " · " + x.pts + " pts").join("<br>");
+  $("bilan").innerHTML = "<h2>" + (raison || "Manche terminée") + "</h2>" +
+    "Palier atteint : <b>" + palier + "</b> (" + (hard ? "Hardcore" : "Normal") + ")<br>" +
+    "Points : <b>" + total + "</b>" + (battu ? " (nouveau record)" : " (record : " + record + ")") + "<br>" +
+    "Focus moyen : <b>" + moyenne + "</b> / 100<br>" +
+    "Temps au-dessus de la ligne : <b>" + pctZone + " %</b><br>" +
+    "Plus longue série : <b>" + Math.round(serieMax) + " s</b><br>" +
+    "Niveau final de la ligne : <b>" + Math.round(seuil) + "</b>" +
+    "<h2 style='margin-top:12px'>Dernières manches</h2><span class='note'>" + lignes + "</span>";
+  $("bilan").style.display = "block";
+  message("Manche terminée. Relance quand tu veux battre ton record.");
+}
+
+function tic(){
+  if (!source) return;
+  const r = {};
+  for (const nom in tampons){
+    const t = tampons[nom];
+    const a = t.n >= N ? analyse(t) : null;
+    r[nom] = a;
+    const bon = a && a.ecart > 0.5 && a.ecart < 60;
+    $("q" + nom).className = "pastille " + (a ? (bon ? "bon" : "mauvais") : "");
+    if (a) a.bon = bon;
+  }
+  const front = [r.AF7, r.AF8].filter(a => a && a.bon);
+  if (phase !== "calibrage" && phase !== "jeu") return;
+
+  let indice = null, emg = null; gel = "";
+  if (!front.length) gel = "Signal du front trop faible : replace le casque.";
+  else if (front.some(a => a.crete > 150)) gel = "Mouvement ou clignement détecté.";
+  else {
+    indice = 0; emg = 0;
+    for (const a of front){ indice += Math.log(a.beta / (a.theta + a.alpha)); emg += Math.log(a.emg + 1e-9); }
+    indice /= front.length; emg /= front.length;
+  }
+
+  if (phase === "calibrage"){
+    const dureeCalib = source === "demo" ? 8 : 30;
+    tPhase += PAS;
+    if (indice !== null){ calib.push(indice); calibEmg.push(emg); }
+    message(gel || ("Calibrage : fixe un point, respire normalement, ne bouge pas. " + Math.max(0, Math.ceil(dureeCalib - tPhase)) + " s"));
+    if (tPhase >= dureeCalib){
+      if (calib.length < 12){ tPhase = 0; calib = []; calibEmg = []; message("Calibrage raté, signal insuffisant. On recommence."); return; }
+      mu = calib.reduce((a, b) => a + b, 0) / calib.length;
+      sigma = Math.max(0.15, Math.sqrt(calib.reduce((a, b) => a + (b - mu) * (b - mu), 0) / calib.length));
+      emgBase = calibEmg.reduce((a, b) => a + b, 0) / calibEmg.length;
+      phase = "jeu";
+    }
+    return;
+  }
+
+  // phase de jeu
+  if (indice !== null && emg > emgBase + 1.2){ gel = "Mâchoire ou front contracté : relâche."; indice = null; }
+  if (indice !== null){
+    const cible = borne(50 + 22 * (indice - mu) / sigma, 0, 100);
+    score += (cible - score) * 0.25;
+    somme += score; nMes++;
+  }
+  ecoule += PAS;
+  if (tFlash > 0) tFlash -= PAS;
+  if (!gel){
+    if (score >= seuil){
+      sous = 0; serie += PAS; enZone += PAS;
+      combo = Math.min(8, 1 + Math.floor(serie / 5));
+      points += (score - seuil + 5) * combo * PAS;
+      if (serie > serieMax) serieMax = serie;
+      if (serie - debutPalier >= objectif){
+        points += 50 * palier; palier++; tBloque = 0;
+        seuil = Math.min(90, seuil + (hard ? 4 : 3));
+        debutPalier = serie; objectif = Math.min(60, 10 + 5 * (palier - 1));
+        flash = "Palier validé. Prochain : tenir " + objectif + " s."; tFlash = 3;
+      }
+    } else {
+      sous += PAS; tBloque += PAS;
+      if (sous > (hard ? 0.5 : 1)){ serie = 0; debutPalier = 0; combo = 1; }
+      if (hard && sous >= 5){
+        vies--; sous = 0; flash = "Vie perdue."; tFlash = 2;
+        if (vies <= 0){ raison = "Plus de vies"; finManche(); return; }
+      }
+      if (!hard && tBloque >= 30){ seuil = Math.max(45, seuil - 3); tBloque = 0; }
+    }
+  }
+  histo.push(score); if (histo.length > 240) histo.shift();
+  message(gel || (tFlash > 0 ? flash : (score >= seuil ? "Tiens. " + Math.max(0, Math.ceil(objectif - (serie - debutPalier))) + " s pour valider le palier." : "Remonte au-dessus de la ligne.")));
+  if (ecoule >= duree) finManche();
+}
+
+/* ---------- affichage ---------- */
+const toile = $("toile"), ctx = toile.getContext("2d");
+function css(nom){ return getComputedStyle(document.documentElement).getPropertyValue(nom).trim(); }
+const COUL = { trait: css("--trait"), ligne: css("--ligne"), focus: css("--focus"), doux: css("--doux"), alerte: css("--alerte") };
+function dessine(){
+  const r = toile.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (toile.width !== Math.round(r.width * dpr) || toile.height !== Math.round(r.height * dpr)){
+    toile.width = Math.round(r.width * dpr); toile.height = Math.round(r.height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const L = r.width, H = r.height, haut = 48, bas = 22;
+  const y = v => haut + (1 - v / 100) * (H - haut - bas);
+  ctx.clearRect(0, 0, L, H);
+  ctx.strokeStyle = COUL.trait; ctx.lineWidth = 1; ctx.fillStyle = COUL.doux; ctx.font = "11px system-ui, sans-serif";
+  for (const v of [0, 25, 50, 75, 100]){
+    ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(L, y(v)); ctx.stroke();
+    ctx.fillText(String(v), 6, y(v) - 3);
+  }
+  if (phase === "jeu" || phase === "fini"){
+    ctx.strokeStyle = COUL.focus; ctx.setLineDash([6, 6]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, y(seuil)); ctx.lineTo(L, y(seuil)); ctx.stroke(); ctx.setLineDash([]);
+    const xFin = L - 40, pas = (xFin - 30) / 239;
+    if (histo.length > 1){
+      ctx.strokeStyle = COUL.ligne; ctx.lineWidth = 2; ctx.beginPath();
+      histo.forEach((v, i) => { const x = xFin - (histo.length - 1 - i) * pas; i ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v)); });
+      ctx.stroke();
+    }
+    const rayon = 9 + combo * 1.5, dessus = score >= seuil && !gel;
+    ctx.fillStyle = gel ? COUL.alerte : (dessus ? COUL.focus : COUL.ligne);
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = dessus ? 10 + combo * 4 : 6;
+    ctx.beginPath(); ctx.arc(xFin, y(score), rayon, 0, 2 * Math.PI); ctx.fill(); ctx.shadowBlur = 0;
+    const prog = borne((serie - debutPalier) / objectif, 0, 1);
+    ctx.fillStyle = COUL.trait; ctx.fillRect(12, H - 10, L - 24, 4);
+    ctx.fillStyle = COUL.focus; ctx.fillRect(12, H - 10, (L - 24) * prog, 4);
+    ctx.fillStyle = COUL.doux; ctx.font = "12px system-ui, sans-serif";
+    ctx.fillText("Combo x" + combo + (hard ? "   Vies " + "●".repeat(Math.max(0, vies)) + "○".repeat(3 - Math.max(0, vies)) : ""), 30, y(100) + 14);
+  }
+  $("focusV").textContent = Math.round(score);
+  $("palierV").textContent = palier;
+  $("pointsV").textContent = Math.round(points);
+  const reste = Math.max(0, Math.ceil(duree - ecoule));
+  $("tempsV").textContent = Math.floor(reste / 60) + ":" + String(reste % 60).padStart(2, "0");
+  requestAnimationFrame(dessine);
+}
+
+$("bConnecter").addEventListener("click", connecter);
+$("bDemo").addEventListener("click", lancerDemo);
+$("bJouer").addEventListener("click", lancerManche);
+setInterval(tic, PAS * 1000);
+requestAnimationFrame(dessine);
+</script>
+</body>
+</html>
